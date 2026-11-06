@@ -1,0 +1,66 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: lifeblood-rate-limit
+  namespace: lifeblood
+spec:
+  rateLimit:
+    average: 5
+    period: 1s
+    burst: 30
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: lifeblood
+  namespace: lifeblood
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production-dns01-cloudflare
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.middlewares: lifeblood-lifeblood-rate-limit@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts: [lifeblood.personalinfra.co.uk]
+      secretName: lifeblood-tls
+  rules:
+    - host: lifeblood.personalinfra.co.uk
+      http:
+        paths:
+          - path: /oura
+            pathType: Prefix
+            backend:
+              service:
+                name: lifeblood
+                port: {name: http}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: lifeblood-https
+  namespace: lifeblood
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: lifeblood-http
+  namespace: lifeblood
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.middlewares: lifeblood-lifeblood-https@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: lifeblood.personalinfra.co.uk
+      http:
+        paths:
+          - path: /oura
+            pathType: Prefix
+            backend:
+              service:
+                name: lifeblood
+                port: {name: http}

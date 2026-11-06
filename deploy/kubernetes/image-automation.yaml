@@ -1,0 +1,46 @@
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: lifeblood
+  namespace: flux-system
+spec:
+  image: ghcr.io/sam-bee/lifeblood
+  interval: 5m
+  secretRef:
+    name: lifeblood-ghcr
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: lifeblood
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: lifeblood
+  filterTags:
+    pattern: '^latest$'
+  policy:
+    alphabetical: {}
+  digestReflectionPolicy: Always
+  interval: 5m
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  name: lifeblood
+  namespace: flux-system
+spec:
+  interval: 5m
+  sourceRef:
+    kind: GitRepository
+    name: casefile-flux-write
+  git:
+    checkout:
+      ref: {branch: main}
+    commit:
+      author: {name: Flux, email: flux@users.noreply.github.com}
+      messageTemplate: 'To deploy Lifeblood, update the latest image'
+    push: {branch: main}
+  update:
+    path: ./infrastructure/containernode/lifeblood
+    strategy: Setters

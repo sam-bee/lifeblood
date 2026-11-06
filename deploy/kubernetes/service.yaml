@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: lifeblood
+  namespace: lifeblood
+spec:
+  selector:
+    app: lifeblood
+  ports:
+    - {name: http, port: 80, targetPort: http}

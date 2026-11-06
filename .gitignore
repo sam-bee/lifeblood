@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+bin/
+coverage.out
+*.secret
+*.pem
+*.key
+.DS_Store
+.secrets/
+__pycache__/

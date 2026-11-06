@@ -1,0 +1,170 @@
+openapi: 3.0.3
+info:
+  title: Lifeblood
+  version: 0.1.0
+  description: Single-person health-data REST API. All end dates are exclusive.
+servers:
+  - url: https://lifeblood.personalinfra.co.uk
+security:
+  - bearer: []
+paths:
+  /oura/daily:
+    get:
+      operationId: getDailyMetrics
+      parameters:
+        - {$ref: '#/components/parameters/start'}
+        - {$ref: '#/components/parameters/end'}
+        - {$ref: '#/components/parameters/cursor'}
+      responses:
+        '200': {$ref: '#/components/responses/Records'}
+        '400': {description: Invalid or out-of-bounds range or cursor}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {description: Oura is not connected}
+  /oura/sleep:
+    get:
+      operationId: getSleep
+      parameters:
+        - {$ref: '#/components/parameters/start'}
+        - {$ref: '#/components/parameters/end'}
+        - {$ref: '#/components/parameters/cursor'}
+      responses:
+        '200': {$ref: '#/components/responses/Records'}
+        '400': {description: Invalid or out-of-bounds range or cursor}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {description: Oura is not connected}
+  /oura/collections/{collection}:
+    get:
+      operationId: getCollection
+      parameters:
+        - name: collection
+          in: path
+          required: true
+          schema: {type: string, enum: [sleep, daily_sleep, daily_readiness, daily_activity]}
+        - {$ref: '#/components/parameters/start'}
+        - {$ref: '#/components/parameters/end'}
+        - {$ref: '#/components/parameters/cursor'}
+      responses:
+        '200': {$ref: '#/components/responses/Records'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {description: Unsupported collection}
+        '409': {description: Oura is not connected}
+  /oura/sync:
+    get:
+      operationId: getSyncStatus
+      responses:
+        '200': {description: Job counts by processing status}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    post:
+      operationId: enqueueSync
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                start: {type: string, format: date}
+                end: {type: string, format: date}
+      responses:
+        '202': {description: Repair jobs durably queued}
+        '400': {description: Invalid JSON or date range}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {description: Account linking or relinking required}
+        '429': {description: Rate limited; observe Retry-After}
+  /oura/connection:
+    get:
+      operationId: getOuraConnection
+      responses:
+        '200': {description: Connection status and collection coverage}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    delete:
+      operationId: disconnectOura
+      responses:
+        '204': {description: Access stopped and credentials removed; retained health data is still readable}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /oura/data:
+    delete:
+      operationId: deleteOuraData
+      responses:
+        '204': {description: Live health data and credentials erased; minimal account pin retained}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /oura/webhooks:
+    get:
+      operationId: verifyOuraWebhook
+      security: []
+      parameters:
+        - {name: verification_token, in: query, required: true, schema: {type: string}}
+        - {name: challenge, in: query, required: true, schema: {type: string, maxLength: 512}}
+      responses:
+        '200': {description: Verified challenge echoed as JSON}
+        '401': {description: Verification failed}
+    post:
+      operationId: receiveOuraWebhook
+      description: Requires valid x-oura-signature and x-oura-timestamp headers. Maximum body 64 KiB.
+      security: []
+      responses:
+        '200': {description: Known account event durably queued, or duplicate/unknown account ignored}
+        '400': {description: Invalid event}
+        '401': {description: Invalid signature or timestamp}
+        '413': {description: Body too large}
+        '500': {description: Persistence failed; delivery must be retried}
+  /oura/oauth/callback:
+    get:
+      operationId: completeOuraSetup
+      description: Completes a single-use ten-minute transaction created only by the operator CLI. No browser UI.
+      security: []
+      parameters:
+        - {name: state, in: query, required: true, schema: {type: string}}
+        - {name: code, in: query, schema: {type: string}}
+      responses:
+        '200': {description: Account connected; history import queued}
+        '400': {description: Authorization failed or expired}
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: One private API_TOKEN for this single-person API.
+  parameters:
+    start:
+      name: start
+      in: query
+      schema: {type: string, format: date}
+      description: Inclusive start date. Default 30 days before the exclusive end.
+    end:
+      name: end
+      in: query
+      schema: {type: string, format: date}
+      description: Exclusive end date. Default tomorrow UTC. Maximum read range 90 days.
+    cursor:
+      name: cursor
+      in: query
+      schema: {type: string, maxLength: 512}
+      description: Opaque next_cursor from the previous response, keeping the same dates.
+  responses:
+    Unauthorized:
+      description: Missing or invalid Authorization bearer token.
+    Records:
+      description: Up to 500 source records with freshness and coverage metadata.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              source: {type: string, enum: [oura]}
+              start: {type: string, format: date}
+              end_exclusive: {type: string, format: date}
+              connection_status: {type: string}
+              next_cursor: {type: string}
+              coverage: {type: array, items: {type: object, additionalProperties: true}}
+              data:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    collection: {type: string}
+                    id: {type: string}
+                    day: {type: string, format: date-time, nullable: true}
+                    fetched_at: {type: string, format: date-time}
+                    data: {type: object, additionalProperties: true}

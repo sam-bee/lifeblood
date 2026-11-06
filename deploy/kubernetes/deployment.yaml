@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lifeblood
+  namespace: lifeblood
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: lifeblood
+  template:
+    metadata:
+      labels:
+        app: lifeblood
+    spec:
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: lifeblood-ghcr
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: migrate
+          image: ghcr.io/sam-bee/lifeblood:latest # {"$imagepolicy": "flux-system:lifeblood"}
+          args: [migrate]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: lifeblood-config
+                  key: MIGRATION_DATABASE_URL
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 500m, memory: 128Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+      containers:
+        - name: lifeblood
+          image: ghcr.io/sam-bee/lifeblood:latest # {"$imagepolicy": "flux-system:lifeblood"}
+          env:
+            - name: PUBLIC_BASE_URL
+              value: https://lifeblood.personalinfra.co.uk
+            - name: TRUSTED_PROXY_CIDRS
+              value: 10.42.0.0/16
+            - name: INITIAL_HISTORY_DAYS
+              value: '90'
+            - name: DATA_RETENTION_DAYS
+              value: '365'
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: lifeblood-config, key: DATABASE_URL}
+            - name: API_TOKEN
+              valueFrom:
+                secretKeyRef: {name: lifeblood-config, key: API_TOKEN}
+            - name: TOKEN_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef: {name: lifeblood-config, key: TOKEN_ENCRYPTION_KEY}
+            - name: OURA_CLIENT_ID
+              valueFrom:
+                secretKeyRef: {name: lifeblood-config, key: OURA_CLIENT_ID}
+            - name: OURA_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: {name: lifeblood-config, key: OURA_CLIENT_SECRET}
+            - name: OURA_WEBHOOK_VERIFICATION_TOKEN
+              valueFrom:
+                secretKeyRef: {name: lifeblood-config, key: OURA_WEBHOOK_VERIFICATION_TOKEN}
+          ports:
+            - {name: http, containerPort: 8080}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: '1', memory: 256Mi}
+          startupProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
