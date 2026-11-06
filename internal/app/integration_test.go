@@ -372,3 +372,79 @@ func TestIntegrationAuthorizationIsSingleUseAndPinsOneAccount(t *testing.T) {
 		t.Fatal("wrong account linked")
 	}
 }
+
+func TestIntegrationSubscriptionCreationAndRenewalWithProductionExpiry(t *testing.T) {
+	s := integrationStore(t)
+	var mu sync.Mutex
+	var subscriptions []map[string]string
+	created, renewed := 0, 0
+	expiry := time.Now().UTC().Add(90 * 24 * time.Hour).Format("2006-01-02T15:04:05.999999")
+	o := mockOura(t, s, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-client-id") != s.Config.OuraClientID || r.Header.Get("x-client-secret") != s.Config.OuraClientSecret {
+			t.Error("missing application credentials")
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			if subscriptions == nil {
+				fmt.Fprint(w, "[]")
+			} else {
+				json.NewEncoder(w).Encode(subscriptions)
+			}
+		case http.MethodPost:
+			var input map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				t.Error(err)
+			}
+			if input["verification_token"] != s.Config.WebhookSecret || input["callback_url"] != s.Config.PublicURL+"/oura/webhooks" {
+				t.Error("incorrect webhook configuration")
+			}
+			created++
+			sub := map[string]string{"id": fmt.Sprintf("subscription-%d", created), "callback_url": input["callback_url"],
+				"data_type": input["data_type"], "event_type": input["event_type"], "expiration_time": expiry}
+			subscriptions = append(subscriptions, sub)
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(sub)
+		case http.MethodPut:
+			id := strings.TrimPrefix(r.URL.Path, "/v2/webhook/subscription/renew/")
+			for _, sub := range subscriptions {
+				if sub["id"] == id {
+					renewed++
+					sub["expiration_time"] = expiry
+					json.NewEncoder(w).Encode(sub)
+					return
+				}
+			}
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
+	ctx := context.Background()
+	if err := o.ReconcileSubscriptions(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.ReconcileSubscriptions(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	if created != 12 {
+		t.Fatalf("expected 12 subscriptions without duplicates, got %d", created)
+	}
+	subscriptions[0]["expiration_time"] = time.Now().UTC().Add(time.Hour).Format("2006-01-02T15:04:05.999999")
+	mu.Unlock()
+	if err := o.ReconcileSubscriptions(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if renewed != 1 || created != 12 {
+		t.Fatalf("unexpected renewal/create counts: %d/%d", renewed, created)
+	}
+	var count int
+	if err := s.DB.QueryRow(ctx, "SELECT count(*) FROM webhook_subscriptions WHERE expires_at>now()+interval '1 day'").Scan(&count); err != nil || count != 12 {
+		t.Fatalf("subscriptions not persisted with valid expiration: %d %v", count, err)
+	}
+}

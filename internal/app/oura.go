@@ -304,12 +304,32 @@ func (o *Oura) Fetch(ctx context.Context, c Connection, path string, out any) er
 	return err
 }
 
+// Oura's production subscription responses can omit the UTC timezone suffix,
+// although the schema describes an RFC 3339 date-time. Handle both forms.
+type subscriptionTime struct{ time.Time }
+
+func (t *subscriptionTime) UnmarshalJSON(data []byte) error {
+	var value string
+	if err := json.Unmarshal(data, &value); err != nil {
+		return errors.New("invalid_subscription_expiry")
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		parsed, err = time.Parse("2006-01-02T15:04:05.999999999", value)
+	}
+	if err != nil {
+		return errors.New("invalid_subscription_expiry")
+	}
+	t.Time = parsed
+	return nil
+}
+
 type Subscription struct {
-	ID         string    `json:"id"`
-	Callback   string    `json:"callback_url"`
-	Collection string    `json:"data_type"`
-	Event      string    `json:"event_type"`
-	Expiry     time.Time `json:"expiration_time"`
+	ID         string           `json:"id"`
+	Callback   string           `json:"callback_url"`
+	Collection string           `json:"data_type"`
+	Event      string           `json:"event_type"`
+	Expiry     subscriptionTime `json:"expiration_time"`
 }
 
 func (o *Oura) ReconcileSubscriptions(ctx context.Context) error {
@@ -340,7 +360,7 @@ func (o *Oura) ReconcileSubscriptions(ctx context.Context) error {
 			if sub.ID == "" || sub.Expiry.IsZero() {
 				return errors.New("invalid_subscription")
 			}
-			if _, err = o.Store.DB.Exec(ctx, `INSERT INTO webhook_subscriptions VALUES($1,$2,$3,$4) ON CONFLICT(subscription_id) DO UPDATE SET expires_at=EXCLUDED.expires_at`, sub.ID, collection, event, sub.Expiry); err != nil {
+			if _, err = o.Store.DB.Exec(ctx, `INSERT INTO webhook_subscriptions VALUES($1,$2,$3,$4) ON CONFLICT(subscription_id) DO UPDATE SET expires_at=EXCLUDED.expires_at`, sub.ID, collection, event, sub.Expiry.Time); err != nil {
 				return err
 			}
 		}
