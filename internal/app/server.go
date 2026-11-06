@@ -15,11 +15,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
+	"github.com/sam-bee/lifeblood/internal/eufylife"
 )
 
 type Server struct {
 	Store *Store
 	Oura  *Oura
+	Eufy  EufyClient
 	Log   *slog.Logger
 }
 
@@ -32,6 +34,9 @@ func (e *apiError) Error() string        { return e.code }
 func fail(status int, code string) error { return &apiError{status, code} }
 
 func (s *Server) Handler() *echo.Echo {
+	if s.Eufy == nil {
+		s.Eufy = eufylife.New(s.Store.Config.EufyEmail, s.Store.Config.EufyPassword)
+	}
 	e := echo.New()
 	e.IPExtractor = echo.ExtractIPDirect()
 	if len(s.Store.Config.TrustedProxies) > 0 {
@@ -112,6 +117,13 @@ func (s *Server) Handler() *echo.Echo {
 	api.GET("/sync", s.syncStatus)
 	api.DELETE("/connection", func(c *echo.Context) error { return s.disconnect(c, false) })
 	api.DELETE("/data", func(c *echo.Context) error { return s.disconnect(c, true) })
+	eufy := e.Group("/eufy", s.authenticate)
+	eufy.Use(limit(5, 30, func(*echo.Context) (string, error) { return "owner", nil }, nil))
+	eufy.GET("/connection", func(c *echo.Context) error { return c.JSON(200, s.Eufy.Status()) })
+	eufy.GET("/members", s.eufyMembers)
+	eufy.GET("/devices", s.eufyDevices)
+	eufy.GET("/measurements", s.eufyMeasurements)
+	eufy.GET("/latest-weight", s.eufyLatestWeight)
 	return e
 }
 

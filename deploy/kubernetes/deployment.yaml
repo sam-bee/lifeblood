@@ -72,6 +72,12 @@ spec:
             - name: OURA_WEBHOOK_VERIFICATION_TOKEN
               valueFrom:
                 secretKeyRef: {name: lifeblood-config, key: OURA_WEBHOOK_VERIFICATION_TOKEN}
+            - name: EUFYLIFE_EMAIL
+              valueFrom:
+                secretKeyRef: {name: lifeblood-config, key: EUFYLIFE_EMAIL, optional: true}
+            - name: EUFYLIFE_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: lifeblood-config, key: EUFYLIFE_PASSWORD, optional: true}
           ports:
             - {name: http, containerPort: 8080}
           resources:

@@ -110,7 +110,8 @@ func TestEveryDataAndControlRouteRequiresBearer(t *testing.T) {
 	s := &Store{Config: testConfig()}
 	api := (&Server{Store: s, Oura: NewOura(s), Log: testLog()}).Handler()
 	for _, route := range []struct{ method, path string }{{"GET", "/oura/connection"}, {"GET", "/oura/daily"}, {"GET", "/oura/sleep"},
-		{"GET", "/oura/collections/sleep"}, {"POST", "/oura/sync"}, {"GET", "/oura/sync"}, {"DELETE", "/oura/data"}, {"DELETE", "/oura/connection"}} {
+		{"GET", "/oura/collections/sleep"}, {"POST", "/oura/sync"}, {"GET", "/oura/sync"}, {"DELETE", "/oura/data"}, {"DELETE", "/oura/connection"},
+		{"GET", "/eufy/connection"}, {"GET", "/eufy/members"}, {"GET", "/eufy/devices"}, {"GET", "/eufy/measurements"}, {"GET", "/eufy/latest-weight"}} {
 		for _, token := range []string{"", strings.Repeat("wrong", 8)} {
 			w := testRequest(api, route.method, route.path, token)
 			if w.Code != 401 {
@@ -121,13 +122,15 @@ func TestEveryDataAndControlRouteRequiresBearer(t *testing.T) {
 			}
 		}
 	}
+	// Reset the per-IP limiter after exercising all unauthenticated routes.
+	api = (&Server{Store: s, Oura: NewOura(s), Log: testLog()}).Handler()
 	if w := testRequest(api, "GET", "/oura/collections/not-allowed", testToken); w.Code != 404 {
 		t.Fatalf("valid bearer rejected: %d", w.Code)
 	}
 	if w := testRequest(api, "GET", "/oura/daily?token="+testToken, ""); w.Code != 401 {
 		t.Fatal("query-string token accepted")
 	}
-	for _, path := range []string{"/", "/auth/login", "/oura/authorize", "/eufy/latest-weight"} {
+	for _, path := range []string{"/", "/auth/login", "/oura/authorize"} {
 		if w := testRequest(api, "GET", path, testToken); w.Code != 404 {
 			t.Fatalf("unexpected interface at %s: %d", path, w.Code)
 		}

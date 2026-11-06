@@ -1,13 +1,88 @@
 openapi: 3.0.3
 info:
   title: Lifeblood
-  version: 0.1.0
+  version: 0.2.0
   description: Single-person health-data REST API. All end dates are exclusive.
 servers:
   - url: https://lifeblood.personalinfra.co.uk
 security:
   - bearer: []
 paths:
+  /eufy/connection:
+    get:
+      operationId: getEufyConnection
+      description: Configuration and cache status; does not call Eufy.
+      responses:
+        '200': {description: Eufy connection status, cache freshness and optional retry_at}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /eufy/members:
+    get:
+      operationId: getEufyMembers
+      description: Member IDs, names and default flags from the most recent cloud login.
+      responses:
+        '200': {description: source, data array of members, and cache metadata}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '502': {description: Eufy unavailable or malformed response; observe Retry-After}
+        '503': {description: Eufy credentials absent or rejected; observe Retry-After}
+  /eufy/devices:
+    get:
+      operationId: getEufyDevices
+      responses:
+        '200': {description: source, data array of device IDs and names, and cache metadata}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '502': {description: Eufy unavailable or malformed response; observe Retry-After}
+        '503': {description: Eufy credentials absent or rejected; observe Retry-After}
+  /eufy/latest-weight:
+    get:
+      operationId: getEufyLatestWeight
+      description: Latest available weigh-in for the default or sole member, or the specified customer_id. Shares the five-minute snapshot with all Eufy data routes.
+      parameters:
+        - {$ref: '#/components/parameters/eufyCustomer'}
+      responses:
+        '200':
+          description: Latest available weight and body composition; measurement time and cache fetch time are separate.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  source: {type: string, enum: [eufy]}
+                  cache: {$ref: '#/components/schemas/EufyCache'}
+                  data: {$ref: '#/components/schemas/EufyMeasurement'}
+        '400': {description: Invalid customer ID or ambiguous account requires customer_id}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {description: Unknown customer or no weight reading}
+        '502': {description: Eufy unavailable or malformed response; observe Retry-After}
+        '503': {description: Eufy credentials absent or rejected; observe Retry-After}
+  /eufy/measurements:
+    get:
+      operationId: getEufyMeasurements
+      description: Available cloud history, newest first. All filtering and pagination use the shared five-minute snapshot. End dates are exclusive; no dates selects all available records. Offsets may shift after a refresh.
+      parameters:
+        - {$ref: '#/components/parameters/eufyCustomer'}
+        - {name: start, in: query, schema: {type: string, format: date}, description: Inclusive UTC date}
+        - {name: end, in: query, schema: {type: string, format: date}, description: Exclusive UTC date}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 1000000, default: 0}}
+      responses:
+        '200':
+          description: Available measurements with local pagination and cache metadata. Not a guarantee of complete historical coverage.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  source: {type: string, enum: [eufy]}
+                  cache: {$ref: '#/components/schemas/EufyCache'}
+                  total: {type: integer}
+                  next_offset: {type: integer, nullable: true}
+                  skipped_records: {type: integer, description: Upstream records without a member, scale data or timestamp}
+                  data: {type: array, items: {$ref: '#/components/schemas/EufyMeasurement'}}
+        '400': {description: Invalid filters or pagination}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {description: Unknown customer}
+        '502': {description: Eufy unavailable or malformed response; observe Retry-After}
+        '503': {description: Eufy credentials absent or rejected; observe Retry-After}
   /oura/daily:
     get:
       operationId: getDailyMetrics
@@ -126,7 +201,43 @@ components:
       type: http
       scheme: bearer
       description: One private API_TOKEN for this single-person API.
+  schemas:
+    EufyCache:
+      type: object
+      properties:
+        fetched_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        ttl_seconds: {type: integer, enum: [300]}
+    EufyMeasurement:
+      type: object
+      description: Missing or zero source metrics are null. Weight is in kilograms; uncertain source fields are omitted.
+      properties:
+        id: {type: string}
+        customer_id: {type: string}
+        device_id: {type: string}
+        product_code: {type: string}
+        timestamp: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        weight_kg: {type: number, nullable: true}
+        bmi: {type: number, nullable: true}
+        body_fat_percent: {type: number, nullable: true}
+        body_fat_mass_kg: {type: number, nullable: true}
+        muscle_mass_kg: {type: number, nullable: true}
+        skeletal_muscle_mass_kg: {type: number, nullable: true}
+        bone_mass_kg: {type: number, nullable: true}
+        water_percent: {type: number, nullable: true}
+        subcutaneous_fat_percent: {type: number, nullable: true}
+        visceral_fat_level: {type: number, nullable: true}
+        bmr_kcal_per_day: {type: number, nullable: true}
+        body_age_years: {type: number, nullable: true}
+        protein_percent: {type: number, nullable: true}
+        heart_rate_bpm: {type: number, nullable: true}
   parameters:
+    eufyCustomer:
+      name: customer_id
+      in: query
+      schema: {type: string, maxLength: 256}
+      description: Eufy Life member ID from /eufy/members.
     start:
       name: start
       in: query

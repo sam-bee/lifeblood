@@ -66,7 +66,7 @@ receives only its restricted database credentials.
    Do not imperatively overwrite Flux-managed images.
 
 The existing DNS01 Cloudflare certificate issuer issues the host certificate.
-Only `/oura` is publicly routed; `/eufy` is reserved for future functionality.
+Both `/oura` and `/eufy` are publicly routed to the same authenticated API.
 Port 80 redirects to HTTPS. The API remains private behind its bearer token even
 though the hostname is publicly reachable. Webhooks and the setup callback use
 their own cryptographic checks. Keep ingress access logs disabled or redact
@@ -74,7 +74,7 @@ callback and webhook query strings.
 
 NetworkPolicy allows ingress from Traefik, DNS, the shared PostgreSQL 18 service,
 and outbound public HTTPS. Standard Kubernetes policies cannot restrict egress
-by DNS name; the application uses fixed Oura hosts and refuses HTTP redirects.
+by DNS name; the application uses fixed Oura and Eufy hosts and refuses HTTP redirects.
 Verify actual CNI policy enforcement. No Redis, public database port, application
 volume or browser authentication provider is required.
 

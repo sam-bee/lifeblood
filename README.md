@@ -1,8 +1,8 @@
 # Lifeblood
 
-A single-person REST API for personal health data, initially Oura. One Go/Echo
-application, one repository, one container deployment. Eufy can be added as a
-module later. There is no browser UI, SSO, user registration, or Redis.
+A single-person REST API for Oura and Eufy Life health data. One Go/Echo
+application, one repository, one container deployment. There is no browser UI,
+SSO, user registration, or Redis.
 
 Production origin: `https://lifeblood.personalinfra.co.uk`.
 
@@ -17,6 +17,11 @@ Authorization: Bearer <API_TOKEN>
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/oura/connection` | Connection status and collection coverage. |
+| GET | `/eufy/connection` | Eufy configuration and cache status; never calls the cloud. |
+| GET | `/eufy/members` | Eufy Life member IDs and names. |
+| GET | `/eufy/devices` | Eufy Life device IDs and names. |
+| GET | `/eufy/latest-weight` | Latest weight and body composition for the default member; optional `customer_id`. |
+| GET | `/eufy/measurements` | Available scale history, optional `customer_id`, `start`, `end`, `limit`, `offset`. |
 | GET | `/oura/daily` | Sleep, readiness and activity daily source records. |
 | GET | `/oura/sleep` | Detailed sleep records, including multiple periods per day. |
 | GET | `/oura/collections/{collection}` | One of `daily_sleep`, `daily_readiness`, `daily_activity`, `sleep`. |
@@ -25,13 +30,22 @@ Authorization: Bearer <API_TOKEN>
 | DELETE | `/oura/connection` | Stop collection, cancel work, erase credentials, attempt upstream revocation. |
 | DELETE | `/oura/data` | Disconnect and erase live health records, sync metadata, inbox and jobs. |
 
-Read endpoints accept `start`, `end`, and `cursor`. End dates are **exclusive**.
+Oura read endpoints accept `start`, `end`, and `cursor`. End dates are **exclusive**.
 Defaults cover 30 days; reads are limited to 90 days and 500 records per page.
 Use the returned `next_cursor` with the same dates to read subsequent pages.
 Responses preserve Oura payloads and nulls, and include source and coverage
 metadata. `fetched_at` means the cloud record was fetched, not that the ring
 itself recently synchronized. Coverage describes the latest contiguous range
 completed for each collection; it does not claim observations exist on every day.
+
+Eufy Life uses the app's email/password login. Set `EUFYLIFE_EMAIL` and
+`EUFYLIFE_PASSWORD` together in `.secrets/config.env`, encrypt and deploy using
+the existing SOPS workflow. Blank credentials leave Oura running and Eufy disabled.
+Eufy responses share an on-demand **five-minute in-process cache**, including
+concurrent requests and local filtering. There is no background polling or cache
+bypass. Responses include `cache.fetched_at` and `cache.expires_at`; scale readings
+have their own `timestamp`. Eufy data and session tokens stay in memory and are
+cleared on restart. See [Eufy setup and API details](docs/eufy.md).
 
 The unauthenticated integration endpoints are `/oura/webhooks` (GET challenge,
 POST signed notifications) and `/oura/oauth/callback` (single-use Oura grant).

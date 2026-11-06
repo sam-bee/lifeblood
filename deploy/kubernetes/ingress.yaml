@@ -27,6 +27,12 @@ spec:
     - host: lifeblood.personalinfra.co.uk
       http:
         paths:
+          - path: /eufy
+            pathType: Prefix
+            backend:
+              service:
+                name: lifeblood
+                port: {name: http}
           - path: /oura
             pathType: Prefix
             backend:
@@ -58,6 +64,12 @@ spec:
     - host: lifeblood.personalinfra.co.uk
       http:
         paths:
+          - path: /eufy
+            pathType: Prefix
+            backend:
+              service:
+                name: lifeblood
+                port: {name: http}
           - path: /oura
             pathType: Prefix
             backend:

@@ -13,6 +13,7 @@ import (
 type Config struct {
 	Address, PublicURL, DatabaseURL               string
 	OuraClientID, OuraClientSecret, WebhookSecret string
+	EufyEmail, EufyPassword                       string
 	EncryptionKey                                 []byte
 	APITokenHash                                  []byte
 	TrustedProxies                                []*net.IPNet
@@ -24,6 +25,7 @@ func LoadConfig() (Config, error) { return ParseConfig(os.Getenv) }
 func ParseConfig(get func(string) string) (Config, error) {
 	c := Config{Address: ":8080", PublicURL: get("PUBLIC_BASE_URL"), DatabaseURL: get("DATABASE_URL"),
 		OuraClientID: get("OURA_CLIENT_ID"), OuraClientSecret: get("OURA_CLIENT_SECRET"),
+		EufyEmail: strings.TrimSpace(get("EUFYLIFE_EMAIL")), EufyPassword: get("EUFYLIFE_PASSWORD"),
 		WebhookSecret: get("OURA_WEBHOOK_VERIFICATION_TOKEN"), HistoryDays: 90, RetentionDays: 365}
 	if v := get("LISTEN_ADDRESS"); v != "" {
 		c.Address = v
@@ -48,6 +50,9 @@ func ParseConfig(get func(string) string) (Config, error) {
 		return c, fmt.Errorf("API_TOKEN must have at least 32 characters")
 	}
 	c.APITokenHash = digest(get("API_TOKEN"))
+	if (c.EufyEmail == "") != (c.EufyPassword == "") {
+		return c, fmt.Errorf("configure EUFYLIFE_EMAIL and EUFYLIFE_PASSWORD together")
+	}
 	if (c.OuraClientID != "" || c.OuraClientSecret != "") &&
 		(c.OuraClientID == "" || c.OuraClientSecret == "" || len(c.WebhookSecret) < 32) {
 		return c, fmt.Errorf("configure all Oura credentials together; webhook verification token must have at least 32 characters")
