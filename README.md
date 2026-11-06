@@ -27,8 +27,6 @@ Authorization: Bearer <API_TOKEN>
 | GET | `/oura/collections/{collection}` | One of `daily_sleep`, `daily_readiness`, `daily_activity`, `sleep`. |
 | POST | `/oura/sync` | Queue a bounded resync, with JSON `{"start":"YYYY-MM-DD","end":"YYYY-MM-DD"}`. |
 | GET | `/oura/sync` | Counts of queued, running, failed and completed jobs. |
-| DELETE | `/oura/connection` | Stop collection, cancel work, erase credentials, attempt upstream revocation. |
-| DELETE | `/oura/data` | Disconnect and erase live health records, sync metadata, inbox and jobs. |
 
 Oura read endpoints accept `start`, `end`, and `cursor`. End dates are **exclusive**.
 Defaults cover 30 days; reads are limited to 90 days and 500 records per page.
@@ -93,11 +91,18 @@ restart. The worker follows pagination, handles rate limits, keeps deletion
 tombstones and reconciles a seven-day overlap daily and after restarts. An
 extended outage may require `POST /oura/sync` with a wider range.
 
+Here, sync means copying Oura cloud records into Lifeblood's PostgreSQL database.
+`POST /oura/sync` queues a background fetch for all four supported collections
+over the requested dates, updating stored records and reconciling upstream
+deletions. It returns 202 once queued. `GET /oura/sync` reports job counts by
+status. This does not trigger a ring-to-phone or phone-to-cloud upload; Oura must
+already have the records. Webhooks normally keep the database current, with
+periodic reconciliation to catch missed events.
+
 Default live-data retention is **365 days**. Jobs and inbox metadata are retained
-for 30 days; OAuth transactions expire after ten minutes. Deletion removes live
-health payloads and credentials but retains the minimal pinned Oura account ID,
-so a different person's account cannot silently replace it. Backups follow the
-cluster backup policy; verify its retention and restoration before importing
+for 30 days; OAuth transactions expire after ten minutes. The pinned Oura account
+ID prevents a different person's account from silently replacing it. Backups
+follow the cluster backup policy; verify its retention and restoration before importing
 real data. Keep the token-encryption key with encrypted backups. Key rotation
 requires re-encrypting stored tokens, not simply replacing the configuration key.
 

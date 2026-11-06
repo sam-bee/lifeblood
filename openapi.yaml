@@ -153,17 +153,6 @@ paths:
       responses:
         '200': {description: Connection status and collection coverage}
         '401': {$ref: '#/components/responses/Unauthorized'}
-    delete:
-      operationId: disconnectOura
-      responses:
-        '204': {description: Access stopped and credentials removed; retained health data is still readable}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-  /oura/data:
-    delete:
-      operationId: deleteOuraData
-      responses:
-        '204': {description: Live health data and credentials erased; minimal account pin retained}
-        '401': {$ref: '#/components/responses/Unauthorized'}
   /oura/webhooks:
     get:
       operationId: verifyOuraWebhook

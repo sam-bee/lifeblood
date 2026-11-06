@@ -110,7 +110,7 @@ func TestEveryDataAndControlRouteRequiresBearer(t *testing.T) {
 	s := &Store{Config: testConfig()}
 	api := (&Server{Store: s, Oura: NewOura(s), Log: testLog()}).Handler()
 	for _, route := range []struct{ method, path string }{{"GET", "/oura/connection"}, {"GET", "/oura/daily"}, {"GET", "/oura/sleep"},
-		{"GET", "/oura/collections/sleep"}, {"POST", "/oura/sync"}, {"GET", "/oura/sync"}, {"DELETE", "/oura/data"}, {"DELETE", "/oura/connection"},
+		{"GET", "/oura/collections/sleep"}, {"POST", "/oura/sync"}, {"GET", "/oura/sync"},
 		{"GET", "/eufy/connection"}, {"GET", "/eufy/members"}, {"GET", "/eufy/devices"}, {"GET", "/eufy/measurements"}, {"GET", "/eufy/latest-weight"}} {
 		for _, token := range []string{"", strings.Repeat("wrong", 8)} {
 			w := testRequest(api, route.method, route.path, token)
@@ -133,6 +133,16 @@ func TestEveryDataAndControlRouteRequiresBearer(t *testing.T) {
 	for _, path := range []string{"/", "/auth/login", "/oura/authorize"} {
 		if w := testRequest(api, "GET", path, testToken); w.Code != 404 {
 			t.Fatalf("unexpected interface at %s: %d", path, w.Code)
+		}
+	}
+}
+
+func TestDeleteEndpointsAreAbsent(t *testing.T) {
+	s := &Store{Config: testConfig()}
+	api := (&Server{Store: s, Oura: NewOura(s), Log: testLog()}).Handler()
+	for _, path := range []string{"/oura/connection", "/oura/data"} {
+		if w := testRequest(api, http.MethodDelete, path, testToken); w.Code != http.StatusNotFound {
+			t.Fatalf("DELETE %s: %d %s", path, w.Code, w.Body.String())
 		}
 	}
 }

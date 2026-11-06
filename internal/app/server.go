@@ -115,8 +115,6 @@ func (s *Server) Handler() *echo.Echo {
 	})
 	api.POST("/sync", s.sync, limit(1.0/60, 2, func(*echo.Context) (string, error) { return "sync", nil }, nil))
 	api.GET("/sync", s.syncStatus)
-	api.DELETE("/connection", func(c *echo.Context) error { return s.disconnect(c, false) })
-	api.DELETE("/data", func(c *echo.Context) error { return s.disconnect(c, true) })
 	eufy := e.Group("/eufy", s.authenticate)
 	eufy.Use(limit(5, 30, func(*echo.Context) (string, error) { return "owner", nil }, nil))
 	eufy.GET("/connection", func(c *echo.Context) error { return c.JSON(200, s.Eufy.Status()) })
@@ -286,13 +284,6 @@ func (s *Server) syncStatus(c *echo.Context) error {
 		return err
 	}
 	return c.JSON(200, map[string]any{"jobs": counts})
-}
-
-func (s *Server) disconnect(c *echo.Context, erase bool) error {
-	if err := s.Oura.Disconnect(c.Request().Context(), erase); err != nil {
-		return err
-	}
-	return c.NoContent(204)
 }
 
 func (s *Server) verifyWebhook(c *echo.Context) error {
