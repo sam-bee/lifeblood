@@ -111,7 +111,12 @@ for authenticated API traffic (burst 30), and two resync requests with a refill
 of one per minute. Traefik adds an outer limit. Only explicitly trusted proxy
 CIDRs can supply forwarded client IPs. Counters reset on restart; keep one
 replica while using these limits. API credentials are accepted only in headers.
-Logs omit URLs, query strings, tokens, authorization headers and health payloads.
+Requests produce JSON access logs on stdout with method, matched route template,
+final status, duration in milliseconds and response size. Successful health and
+readiness probes are quiet; failed probes are logged. Logs omit raw URLs, query
+strings, route parameter values, tokens, headers, health payloads and raw errors.
+The cluster's Alloy collector sends these logs to Loki for viewing in Grafana,
+with a rolling **seven-day log retention** window. See [logging](docs/deployment.md#request-logs-in-grafana).
 
 The ChatGPT/MCP data-path decision from the earlier Oura research is deferred;
 this implementation provides REST and does not expose an MCP server.

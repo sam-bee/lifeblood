@@ -47,6 +47,9 @@ func (s *Server) Handler() *echo.Echo {
 		e.IPExtractor = echo.ExtractIPFromXFFHeader(opts...)
 	}
 	e.HTTPErrorHandler = func(c *echo.Context, err error) {
+		if response, _ := echo.UnwrapResponse(c.Response()); response != nil && response.Committed {
+			return
+		}
 		status, code := http.StatusInternalServerError, "internal_error"
 		var own *apiError
 		var httpErr interface{ StatusCode() int }
@@ -56,11 +59,10 @@ func (s *Server) Handler() *echo.Echo {
 			status = httpErr.StatusCode()
 			code = http.StatusText(status)
 		}
-		if status >= 500 {
-			s.Log.Error("request failed", "route", c.Path(), "status", status)
-		}
 		_ = c.JSON(status, map[string]any{"error": map[string]string{"code": code}})
 	}
+	// Keep logging outside recovery so panics are recorded with their final status.
+	e.Use(requestLogger(s.Log))
 	e.Use(middleware.RecoverWithConfig(middleware.RecoverConfig{DisablePrintStack: true, DisableStackAll: true}))
 	e.Use(middleware.BodyLimit(64 * 1024))
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {

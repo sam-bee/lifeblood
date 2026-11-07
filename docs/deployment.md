@@ -103,3 +103,33 @@ loaded on process startup. API token rotation invalidates the previous token.
 Back up and restore the dedicated database and token-encryption key. The service
 does not restart just because Oura is unavailable; inspect `/oura/connection`,
 `/oura/sync` and payload-free worker logs for ingestion failures.
+
+## Request logs in Grafana
+
+Lifeblood writes one JSON `request completed` event to stdout per request, except
+successful `/healthz` and `/readyz` probes. Alloy already tails all pod logs and
+labels this Deployment with `namespace="lifeblood"`, `app="lifeblood"` and
+`container="lifeblood"`, then forwards them to Loki. No sidecar, application Loki
+credentials, extra egress rule or collector configuration is required.
+
+In Grafana Explore, select the **Loki** datasource and use:
+
+```logql
+{namespace="lifeblood", container="lifeblood"} | json | msg="request completed"
+```
+
+Append `| status >= 400` for failures, `| status >= 500` for server errors, or
+`| duration_ms > 1000` for requests taking over a second. Access records contain
+`method`, `route`, `status`, `duration_ms` and `response_bytes`, plus the JSON
+logger's `time`, `level` and `msg`. Successes use INFO, client errors WARN, and
+server errors ERROR. Errors and recovered panics use the final response status.
+Only registered route templates are logged; unmatched paths become
+`<unmatched>`. Request/response bodies, raw URLs, query strings, route parameter
+values, headers, client IPs and raw errors are excluded.
+
+The existing cluster Loki configuration sets both `retention_period` and
+`max_query_lookback` to **168h (seven days)**. Its compactor runs every ten minutes
+with retention enabled and a two-hour `retention_delete_delay`; physical deletion
+is asynchronous after chunks are marked. This is a rolling log window, separate
+from Lifeblood's 365-day health-record retention in PostgreSQL. The infrastructure
+repository's `observability/loki-helmrelease.yaml` owns these settings.
