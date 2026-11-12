@@ -16,23 +16,25 @@ import (
 	"time"
 )
 
+const testPrivateURL = "https://lifeblood.tailnet.example"
+
 const testToken = "local-test-api-token-with-32-bytes-minimum"
 
 func testConfig() Config {
-	return Config{PublicURL: "https://lifeblood.example", APITokenHash: digest(testToken), EncryptionKey: bytes.Repeat([]byte{1}, 32),
+	return Config{PublicURL: "https://lifeblood.example", PrivateURL: testPrivateURL, APITokenHash: digest(testToken), EncryptionKey: bytes.Repeat([]byte{1}, 32),
 		OuraClientID: "test-client", OuraClientSecret: strings.Repeat("s", 32), WebhookSecret: strings.Repeat("w", 32), HistoryDays: 90, RetentionDays: 365}
 }
 
 func testLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
 func TestConfigurationRequiresAPIAuthButNoSSO(t *testing.T) {
-	values := map[string]string{"PUBLIC_BASE_URL": "https://lifeblood.example", "DATABASE_URL": "postgres://test@localhost/test",
+	values := map[string]string{"PUBLIC_BASE_URL": "https://lifeblood.example", "PRIVATE_BASE_URL": testPrivateURL, "DATABASE_URL": "postgres://test@localhost/test",
 		"API_TOKEN": testToken, "TOKEN_ENCRYPTION_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32))}
 	get := func(k string) string { return values[k] }
 	if _, err := ParseConfig(get); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"API_TOKEN", "TOKEN_ENCRYPTION_KEY", "DATABASE_URL"} {
+	for _, name := range []string{"API_TOKEN", "TOKEN_ENCRYPTION_KEY", "DATABASE_URL", "PRIVATE_BASE_URL"} {
 		old := values[name]
 		delete(values, name)
 		if _, err := ParseConfig(get); err == nil {
@@ -96,19 +98,12 @@ func TestWebhookVerifiesExactBytesAndReplayWindow(t *testing.T) {
 }
 
 func testRequest(handler http.Handler, method, path, token string) *httptest.ResponseRecorder {
-	r := httptest.NewRequest(method, "https://lifeblood.example"+path, nil)
-	r.RemoteAddr = "203.0.113.10:12345"
-	if token != "" {
-		r.Header.Set("Authorization", "Bearer "+token)
-	}
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, r)
-	return w
+	return requestAt(handler, method, testPrivateURL+path, token)
 }
 
 func TestEveryDataAndControlRouteRequiresBearer(t *testing.T) {
 	s := &Store{Config: testConfig()}
-	api := (&Server{Store: s, Oura: NewOura(s), Log: testLog()}).Handler()
+	api := (&Server{Store: s, Oura: NewOura(s), Log: testLog()}).PrivateHandler()
 	for _, route := range []struct{ method, path string }{{"GET", "/oura/connection"}, {"GET", "/oura/daily"}, {"GET", "/oura/sleep"},
 		{"GET", "/oura/collections/sleep"}, {"POST", "/oura/sync"}, {"GET", "/oura/sync"},
 		{"GET", "/eufy/connection"}, {"GET", "/eufy/members"}, {"GET", "/eufy/devices"}, {"GET", "/eufy/measurements"}, {"GET", "/eufy/latest-weight"}} {
@@ -123,7 +118,7 @@ func TestEveryDataAndControlRouteRequiresBearer(t *testing.T) {
 		}
 	}
 	// Reset the per-IP limiter after exercising all unauthenticated routes.
-	api = (&Server{Store: s, Oura: NewOura(s), Log: testLog()}).Handler()
+	api = (&Server{Store: s, Oura: NewOura(s), Log: testLog()}).PrivateHandler()
 	if w := testRequest(api, "GET", "/oura/collections/not-allowed", testToken); w.Code != 404 {
 		t.Fatalf("valid bearer rejected: %d", w.Code)
 	}
@@ -139,7 +134,7 @@ func TestEveryDataAndControlRouteRequiresBearer(t *testing.T) {
 
 func TestDeleteEndpointsAreAbsent(t *testing.T) {
 	s := &Store{Config: testConfig()}
-	api := (&Server{Store: s, Oura: NewOura(s), Log: testLog()}).Handler()
+	api := (&Server{Store: s, Oura: NewOura(s), Log: testLog()}).PrivateHandler()
 	for _, path := range []string{"/oura/connection", "/oura/data"} {
 		if w := testRequest(api, http.MethodDelete, path, testToken); w.Code != http.StatusNotFound {
 			t.Fatalf("DELETE %s: %d %s", path, w.Code, w.Body.String())
@@ -149,9 +144,9 @@ func TestDeleteEndpointsAreAbsent(t *testing.T) {
 
 func TestRateLimitCannotBeBypassedByForgedForwardedHeaders(t *testing.T) {
 	s := &Store{Config: testConfig()}
-	api := (&Server{Store: s, Oura: NewOura(s), Log: testLog()}).Handler()
+	api := (&Server{Store: s, Oura: NewOura(s), Log: testLog()}).PrivateHandler()
 	for n := 0; n < 35; n++ {
-		r := httptest.NewRequest("GET", "https://lifeblood.example/oura/daily", nil)
+		r := httptest.NewRequest("GET", testPrivateURL+"/oura/daily", nil)
 		r.RemoteAddr = "203.0.113.20:1234"
 		r.Header.Set("X-Forwarded-For", fmt.Sprintf("198.51.100.%d", n))
 		r.Header.Set("X-Real-IP", fmt.Sprintf("198.51.100.%d", n))
@@ -161,7 +156,8 @@ func TestRateLimitCannotBeBypassedByForgedForwardedHeaders(t *testing.T) {
 			t.Fatalf("rate limit not enforced: %d", w.Code)
 		}
 	}
-	if w := testRequest(api, "GET", "/healthz", ""); w.Code != 200 {
+	probes := (&Server{Store: s, Oura: NewOura(s), Log: testLog()}).PublicHandler()
+	if w := requestAt(probes, "GET", "https://lifeblood.example/healthz", ""); w.Code != 200 {
 		t.Fatal("health probe rate-limited")
 	}
 }

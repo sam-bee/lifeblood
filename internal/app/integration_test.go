@@ -137,6 +137,43 @@ func TestIntegrationWebhookInboxAndLeaseRecovery(t *testing.T) {
 	}
 }
 
+func TestIntegrationPublicWebhookAndPrivateRetrieval(t *testing.T) {
+	s := integrationStore(t)
+	c := seedConnection(t, s, false)
+	server := &Server{Store: s, Oura: NewOura(s), Log: testLog()}
+	public, private := server.PublicHandler(), server.PrivateHandler()
+	event := Webhook{Event: "update", Collection: "sleep", ObjectID: "listener-test", UserID: c.OuraUserID, EventTime: time.Now().UTC()}
+	body, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	timestamp := fmt.Sprint(time.Now().Unix())
+	req := httptest.NewRequest("POST", s.Config.PublicURL+"/oura/webhooks", strings.NewReader(string(body)))
+	req.Header.Set("x-oura-timestamp", timestamp)
+	req.Header.Set("x-oura-signature", sign(s.Config.OuraClientSecret, timestamp, body))
+	res := httptest.NewRecorder()
+	public.ServeHTTP(res, req)
+	if res.Code != 200 {
+		t.Fatalf("signed public webhook returned %d", res.Code)
+	}
+	var jobs int
+	if err := s.DB.QueryRow(context.Background(), "SELECT count(*) FROM jobs WHERE connection_id=$1", c.ID).Scan(&jobs); err != nil || jobs != 1 {
+		t.Fatalf("webhook was not durably queued: jobs=%d, err=%v", jobs, err)
+	}
+	if res := requestAt(public, "GET", s.Config.PublicURL+"/oura/connection", testToken); res.Code != 404 {
+		t.Fatalf("public retrieval with a valid token returned %d", res.Code)
+	}
+	if res := testRequest(private, "GET", "/oura/connection", testToken); res.Code != 200 {
+		t.Fatalf("private retrieval returned %d", res.Code)
+	}
+	if res := testRequest(private, "GET", "/oura/daily", testToken); res.Code != 200 {
+		t.Fatalf("private health data retrieval returned %d", res.Code)
+	}
+	if res := testRequest(private, "GET", "/oura/daily", ""); res.Code != 401 {
+		t.Fatalf("unauthenticated private retrieval returned %d", res.Code)
+	}
+}
+
 func TestIntegrationRefreshIsSerializedAndPersisted(t *testing.T) {
 	s := integrationStore(t)
 	c := seedConnection(t, s, true)

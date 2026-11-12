@@ -33,7 +33,13 @@ func TestRequestLogsFinalResponse(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var logs bytes.Buffer
-			api := (&Server{Store: &Store{Config: testConfig()}, Log: slog.New(slog.NewJSONHandler(&logs, nil))}).Handler()
+			server := &Server{Store: &Store{Config: testConfig()}, Log: slog.New(slog.NewJSONHandler(&logs, nil))}
+			api := server.PrivateHandler()
+			origin := testPrivateURL
+			if tc.path == "/readyz" {
+				api = server.PublicHandler()
+				origin = server.Store.Config.PublicURL
+			}
 			api.GET("/test/error", func(*echo.Context) error { return errors.New("private-error-value") })
 			api.GET("/test/panic", func(*echo.Context) error { panic("private-panic-value") })
 			api.GET("/test/committed", func(c *echo.Context) error {
@@ -42,7 +48,7 @@ func TestRequestLogsFinalResponse(t *testing.T) {
 				}
 				return errors.New("private-error-after-write")
 			})
-			req := httptest.NewRequest(tc.method, "https://lifeblood.example"+tc.path, strings.NewReader(tc.body))
+			req := httptest.NewRequest(tc.method, origin+tc.path, strings.NewReader(tc.body))
 			if tc.token != "" {
 				req.Header.Set("Authorization", "Bearer "+tc.token)
 			}
@@ -81,7 +87,9 @@ func TestRequestLogsFinalResponse(t *testing.T) {
 
 func TestRequestLogsExcludePrivateValues(t *testing.T) {
 	var logs bytes.Buffer
-	api := (&Server{Store: &Store{Config: testConfig()}, Log: slog.New(slog.NewJSONHandler(&logs, nil))}).Handler()
+	server := &Server{Store: &Store{Config: testConfig()}, Log: slog.New(slog.NewJSONHandler(&logs, nil))}
+	api := server.PrivateHandler()
+	public := server.PublicHandler()
 	api.POST("/test/:id", func(c *echo.Context) error {
 		return c.JSON(200, map[string]string{"health": "private-response-value"})
 	})
@@ -92,12 +100,18 @@ func TestRequestLogsExcludePrivateValues(t *testing.T) {
 		if path == "/test/private-path-value" {
 			method = http.MethodPost
 		}
-		req := httptest.NewRequest(method, "https://lifeblood.example"+path+"?code=private-code-value&state=private-state-value&token="+testToken, strings.NewReader("private-body-value"))
+		origin := testPrivateURL
+		handler := api
+		if path == "/oura/oauth/callback" {
+			origin = server.Store.Config.PublicURL
+			handler = public
+		}
+		req := httptest.NewRequest(method, origin+path+"?code=private-code-value&state=private-state-value&token="+testToken, strings.NewReader("private-body-value"))
 		for _, header := range []string{"Cookie", "Referer", "User-Agent", "X-Request-Id", "X-Forwarded-For"} {
 			req.Header.Set(header, "private-header-value")
 		}
 		req.Header.Set("Authorization", "Bearer "+testToken)
-		api.ServeHTTP(httptest.NewRecorder(), req)
+		handler.ServeHTTP(httptest.NewRecorder(), req)
 	}
 	if strings.Contains(logs.String(), "private-") || strings.Contains(logs.String(), testToken) {
 		t.Fatalf("private request/response/error value in logs: %s", &logs)
@@ -136,7 +150,7 @@ func TestRequestLogsQuietProbesAndRateLimits(t *testing.T) {
 		t.Fatalf("healthy probes logged: %s", &logs)
 	}
 	var res *httptest.ResponseRecorder
-	api := (&Server{Store: &Store{Config: testConfig()}, Log: log}).Handler()
+	api := (&Server{Store: &Store{Config: testConfig()}, Log: log}).PrivateHandler()
 	for range 31 {
 		res = testRequest(api, "GET", "/eufy/connection", "")
 	}

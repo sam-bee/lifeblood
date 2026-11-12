@@ -7,4 +7,4 @@ spec:
   selector:
     app: lifeblood
   ports:
-    - {name: http, port: 80, targetPort: http}
+    - {name: http, port: 80, targetPort: public}

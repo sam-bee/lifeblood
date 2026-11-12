@@ -4,11 +4,14 @@ A single-person REST API for Oura and Eufy Life health data. One Go/Echo
 application, one repository, one container deployment. There is no browser UI,
 SSO, user registration, or Redis.
 
-Production origin: `https://lifeblood.personalinfra.co.uk`.
+Public integration origin: `https://lifeblood.personalinfra.co.uk`.
+Data and control endpoints use the private `svc:lifeblood` Tailscale Service at
+`https://lifeblood.<tailnet-name>.ts.net`, configured by `PRIVATE_BASE_URL`.
 
 ## API
 
-Every data and control request needs the same secret:
+Connect to the tailnet to reach data and control endpoints. Every request still
+needs the same secret:
 
 ```http
 Authorization: Bearer <API_TOKEN>
@@ -47,8 +50,11 @@ cleared on restart. See [Eufy setup and API details](docs/eufy.md).
 
 The unauthenticated integration endpoints are `/oura/webhooks` (GET challenge,
 POST signed notifications) and `/oura/oauth/callback` (single-use Oura grant).
-They expose no existing health records. `/healthz` and `/readyz` are cluster
-probes and are excluded from the public ingress. All responses are JSON or empty;
+They expose no existing health records. They are registered only on the public
+listener (`LISTEN_ADDRESS`, default `:8080`). Data and control routes are registered
+only on the private listener (`PRIVATE_LISTEN_ADDRESS`, default `:8082`), with
+separate hostname checks. `/healthz` and `/readyz` are cluster probes on the public
+listener, excluded from both public ingress and the private listener. All responses are JSON or empty;
 there are no website pages. Full contract: [openapi.yaml](openapi.yaml).
 
 ## Configuration and one-time Oura setup
@@ -60,7 +66,8 @@ there are no website pages. Full contract: [openapi.yaml](openapi.yaml).
    name **Lifeblood**, website (if requested) `https://lifeblood.personalinfra.co.uk`,
    exact redirect **`https://lifeblood.personalinfra.co.uk/oura/oauth/callback`**.
    Initial scopes are `personal daily`.
-3. Fill in `OURA_CLIENT_ID`, `OURA_CLIENT_SECRET` and both database URLs in the
+3. Set `PRIVATE_BASE_URL` to the full HTTPS origin for `svc:lifeblood`.
+   Fill in `OURA_CLIENT_ID`, `OURA_CLIENT_SECRET` and both database URLs in the
    ignored configuration file. See [deployment](docs/deployment.md) for restricted
    database roles and SOPS encryption. Oura credentials may remain blank together
    until registration is complete; data endpoints then report `not_connected`.
@@ -123,7 +130,7 @@ this implementation provides REST and does not expose an MCP server.
 
 ## Development
 
-Requires Go 1.26.10 or later and a disposable PostgreSQL database:
+Requires Go 1.26.11 or later and a disposable PostgreSQL database:
 
 ```sh
 TEST_DATABASE_URL='postgres://postgres:local-test-only@localhost:5432/lifeblood_test?sslmode=disable' go test -race ./...

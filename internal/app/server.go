@@ -33,10 +33,9 @@ type apiError struct {
 func (e *apiError) Error() string        { return e.code }
 func fail(status int, code string) error { return &apiError{status, code} }
 
-func (s *Server) Handler() *echo.Echo {
-	if s.Eufy == nil {
-		s.Eufy = eufylife.New(s.Store.Config.EufyEmail, s.Store.Config.EufyPassword)
-	}
+// handler shares middleware, never route registrations, between the listeners.
+func (s *Server) handler(origin string) *echo.Echo {
+	u, _ := url.Parse(origin)
 	e := echo.New()
 	e.IPExtractor = echo.ExtractIPDirect()
 	if len(s.Store.Config.TrustedProxies) > 0 {
@@ -74,7 +73,6 @@ func (s *Server) Handler() *echo.Echo {
 			h.Set("Strict-Transport-Security", "max-age=31536000")
 			h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
 			if !isProbe(c) {
-				u, _ := url.Parse(s.Store.Config.PublicURL)
 				if c.Request().Host != u.Host {
 					return fail(400, "invalid_host")
 				}
@@ -83,6 +81,12 @@ func (s *Server) Handler() *echo.Echo {
 		}
 	})
 	e.Use(limit(2, 30, func(c *echo.Context) (string, error) { return c.RealIP(), nil }, isProbe))
+	return e
+}
+
+// PublicHandler deliberately has no data or control routes, even for a valid bearer.
+func (s *Server) PublicHandler() *echo.Echo {
+	e := s.handler(s.Store.Config.PublicURL)
 	e.GET("/healthz", func(c *echo.Context) error { return c.JSON(200, map[string]string{"status": "ok"}) })
 	e.GET("/readyz", func(c *echo.Context) error {
 		var version int
@@ -91,7 +95,7 @@ func (s *Server) Handler() *echo.Echo {
 		}
 		return c.JSON(200, map[string]string{"status": "ready"})
 	})
-	// The only public integration endpoint authenticates Oura signatures itself.
+	// Webhooks authenticate Oura signatures; the callback validates single-use state.
 	e.GET("/oura/webhooks", s.verifyWebhook)
 	e.POST("/oura/webhooks", s.receiveWebhook)
 	e.GET("/oura/oauth/callback", func(c *echo.Context) error {
@@ -104,6 +108,14 @@ func (s *Server) Handler() *echo.Echo {
 		}
 		return c.JSON(200, map[string]string{"status": "connected"})
 	})
+	return e
+}
+
+func (s *Server) PrivateHandler() *echo.Echo {
+	if s.Eufy == nil {
+		s.Eufy = eufylife.New(s.Store.Config.EufyEmail, s.Store.Config.EufyPassword)
+	}
+	e := s.handler(s.Store.Config.PrivateURL)
 	api := e.Group("/oura", s.authenticate)
 	api.Use(limit(5, 30, func(*echo.Context) (string, error) { return "owner", nil }, nil))
 	api.GET("/connection", s.connectionStatus)

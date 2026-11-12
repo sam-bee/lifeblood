@@ -27,14 +27,14 @@ spec:
     - host: lifeblood.personalinfra.co.uk
       http:
         paths:
-          - path: /eufy
-            pathType: Prefix
+          - path: /oura/webhooks
+            pathType: Exact
             backend:
               service:
                 name: lifeblood
                 port: {name: http}
-          - path: /oura
-            pathType: Prefix
+          - path: /oura/oauth/callback
+            pathType: Exact
             backend:
               service:
                 name: lifeblood
@@ -64,14 +64,14 @@ spec:
     - host: lifeblood.personalinfra.co.uk
       http:
         paths:
-          - path: /eufy
-            pathType: Prefix
+          - path: /oura/webhooks
+            pathType: Exact
             backend:
               service:
                 name: lifeblood
                 port: {name: http}
-          - path: /oura
-            pathType: Prefix
+          - path: /oura/oauth/callback
+            pathType: Exact
             backend:
               service:
                 name: lifeblood

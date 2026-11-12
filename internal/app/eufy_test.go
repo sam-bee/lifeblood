@@ -33,7 +33,7 @@ func TestEufyRoutesFilterMembersAndPaginateLocally(t *testing.T) {
 			{ID: "yesterday", CustomerID: "owner", WeightKG: &weight, Timestamp: now.Add(-24 * time.Hour)},
 		}}}
 	s := &Store{Config: testConfig()}
-	api := (&Server{Store: s, Oura: NewOura(s), Eufy: f, Log: testLog()}).Handler()
+	api := (&Server{Store: s, Oura: NewOura(s), Eufy: f, Log: testLog()}).PrivateHandler()
 	w := testRequest(api, "GET", "/eufy/latest-weight", testToken)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"id":"today"`) || strings.Contains(w.Body.String(), `"id":"family"`) {
 		t.Fatalf("wrong default member: %s", w.Body.String())
@@ -68,14 +68,14 @@ func TestEufyRoutesFilterMembersAndPaginateLocally(t *testing.T) {
 
 func TestEufyDisabledAndConfigurationPair(t *testing.T) {
 	s := &Store{Config: testConfig()}
-	api := (&Server{Store: s, Oura: NewOura(s), Log: testLog()}).Handler()
+	api := (&Server{Store: s, Oura: NewOura(s), Log: testLog()}).PrivateHandler()
 	if w := testRequest(api, "GET", "/eufy/connection", testToken); w.Code != 200 || !strings.Contains(w.Body.String(), "not_configured") {
 		t.Fatal("missing disabled status")
 	}
 	if w := testRequest(api, "GET", "/eufy/latest-weight", testToken); w.Code != 503 || !strings.Contains(w.Body.String(), "eufy_not_configured") {
 		t.Fatal("missing configuration error")
 	}
-	values := map[string]string{"PUBLIC_BASE_URL": "https://lifeblood.example", "DATABASE_URL": "postgres://test@localhost/test", "API_TOKEN": testToken, "TOKEN_ENCRYPTION_KEY": base64.StdEncoding.EncodeToString(make([]byte, 32))}
+	values := map[string]string{"PUBLIC_BASE_URL": "https://lifeblood.example", "PRIVATE_BASE_URL": testPrivateURL, "DATABASE_URL": "postgres://test@localhost/test", "API_TOKEN": testToken, "TOKEN_ENCRYPTION_KEY": base64.StdEncoding.EncodeToString(make([]byte, 32))}
 	for _, key := range []string{"EUFYLIFE_EMAIL", "EUFYLIFE_PASSWORD"} {
 		values[key] = "value"
 		if _, err := ParseConfig(func(k string) string { return values[k] }); err == nil {

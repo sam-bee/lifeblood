@@ -1,10 +1,14 @@
 openapi: 3.0.3
 info:
   title: Lifeblood
-  version: 0.2.0
-  description: Single-person health-data REST API. All end dates are exclusive.
+  version: 0.3.0
+  description: Single-person health-data REST API. Data and control routes require tailnet access and a bearer token. All end dates are exclusive.
 servers:
-  - url: https://lifeblood.personalinfra.co.uk
+  - url: https://lifeblood.{tailnet}.ts.net
+    description: Private svc:lifeblood Tailscale Service; substitute your tailnet DNS name.
+    variables:
+      tailnet:
+        default: example
 security:
   - bearer: []
 paths:
@@ -154,6 +158,8 @@ paths:
         '200': {description: Connection status and collection coverage}
         '401': {$ref: '#/components/responses/Unauthorized'}
   /oura/webhooks:
+    servers:
+      - url: https://lifeblood.personalinfra.co.uk
     get:
       operationId: verifyOuraWebhook
       security: []
@@ -174,6 +180,8 @@ paths:
         '413': {description: Body too large}
         '500': {description: Persistence failed; delivery must be retried}
   /oura/oauth/callback:
+    servers:
+      - url: https://lifeblood.personalinfra.co.uk
     get:
       operationId: completeOuraSetup
       description: Completes a single-use ten-minute transaction created only by the operator CLI. No browser UI.

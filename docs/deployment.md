@@ -65,16 +65,42 @@ receives only its restricted database credentials.
    before starting the Deployment. Both init and runtime images have Flux setters.
    Do not imperatively overwrite Flux-managed images.
 
-The existing DNS01 Cloudflare certificate issuer issues the host certificate.
-Both `/oura` and `/eufy` are publicly routed to the same authenticated API.
-Port 80 redirects to HTTPS. The API remains private behind its bearer token even
-though the hostname is publicly reachable. Webhooks and the setup callback use
-their own cryptographic checks. Keep ingress access logs disabled or redact
-callback and webhook query strings.
+The existing DNS01 Cloudflare certificate issuer issues the public host certificate.
+Traefik routes only the exact paths `/oura/webhooks` and `/oura/oauth/callback`
+to the public listener on port 8080. HTTP redirects to HTTPS for these integration
+paths only. Retrieval and control paths are absent from the public application
+router, including requests with a valid bearer token. Keep ingress access logs
+disabled or redact callback and webhook query strings.
 
-NetworkPolicy allows ingress from Traefik, DNS, the shared PostgreSQL 18 service,
-and outbound public HTTPS. Standard Kubernetes policies cannot restrict egress
-by DNS name; the application uses fixed Oura and Eufy hosts and refuses HTTP redirects.
+The same container runs a second HTTP listener on port 8082. It registers only the
+bearer-protected Oura and Eufy retrieval/control routes. Its required
+`PRIVATE_BASE_URL` is the full HTTPS origin of your `svc:lifeblood` Tailscale Service;
+store it in the SOPS-encrypted `lifeblood-config` Secret, without committing the
+actual tailnet name in plaintext. Leave `PUBLIC_BASE_URL` on the public origin so
+webhook subscriptions and OAuth redirects remain unchanged.
+
+The Deployment pins to `containernode` and maps the private listener to
+`hostIP: 127.0.0.1`, `hostPort: 8092`. The existing host-level Serve configuration adds:
+
+```sh
+tailscale serve --service=svc:lifeblood --https=443 http://127.0.0.1:8092
+```
+
+Define `svc:lifeblood` with endpoint `tcp:443`, approve its host advertisement if
+required, and grant access only to the intended identities in the tailnet policy.
+Tailscale terminates private HTTPS; the loopback upstream uses HTTP. There is one
+Kubernetes ClusterIP Service for the public listener and no private NodePort,
+LoadBalancer, or public ingress. Probes are absent from the private router.
+The private listener needs no second Kubernetes Service because host-level Serve
+uses the loopback hostPort directly. Both listeners share one worker, connection
+pool, Eufy cache, container image and release. Both ports must bind successfully
+before either listener or ingestion starts; either server failing stops the process.
+
+NetworkPolicy permits Traefik ingress only to port 8080, plus DNS, the shared
+PostgreSQL 18 service and outbound public HTTPS egress. Node-local ingress for
+loopback hostPort traffic is allowed by Kubernetes network-policy semantics;
+there is no general pod ingress rule for the private port. Standard Kubernetes
+policies cannot restrict egress by DNS name; the application uses fixed Oura and Eufy hosts and refuses HTTP redirects.
 Verify actual CNI policy enforcement. No Redis, public database port, application
 volume or browser authentication provider is required.
 
@@ -86,10 +112,21 @@ kubectl -n lifeblood get certificate,ingress
 flux get images all -A
 ```
 
-An unauthenticated `GET https://lifeblood.personalinfra.co.uk/oura/connection`
-must return 401. With `Authorization: Bearer <API_TOKEN>`, it reports
-`not_connected` until one-time Oura linking is completed. A wrong token, including
-a token placed in the URL, must be rejected. Confirm HTTP redirects to HTTPS.
+A public `GET https://lifeblood.personalinfra.co.uk/oura/connection` must return
+404, including with a valid API token. Check all data/control paths and confirm
+that `/healthz` and `/readyz` are not public. Confirm that `/oura/webhooks` rejects
+an invalid challenge or unsigned notification and that the OAuth callback still
+validates its single-use state. Confirm HTTP redirects to HTTPS for integration
+paths and that prefix lookalikes are not routed.
+
+From an authorised tailnet client, query `$PRIVATE_BASE_URL/oura/connection`:
+without a token it must return 401; with `Authorization: Bearer <API_TOKEN>` it
+reports connection/coverage status (`not_connected` before initial linking).
+The private address must return 404 for webhook, OAuth and probe paths. A wrong
+token, including a token placed in the URL, must be rejected. Verify that port
+8092 is unavailable on the node's public address, and that Traefik cannot connect
+to the private pod port. Check the host-local upstream with the private hostname
+in the Host header if DNS or Tailscale Service propagation is still pending.
 
 Run `/lifeblood link` through `kubectl exec` as described in the main README.
 This command is available only to the cluster operator; it is not a public API.

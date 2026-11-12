@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -78,32 +79,63 @@ func run(ctx context.Context, log *slog.Logger) error {
 		fmt.Fprintln(os.Stdout, link)
 		return nil
 	}
-	api := (&app.Server{Store: store, Oura: oura, Log: log}).Handler()
+	api := &app.Server{Store: store, Oura: oura, Log: log}
+	servers := []*http.Server{
+		{Addr: cfg.Address, Handler: api.PublicHandler()},
+		{Addr: cfg.PrivateAddress, Handler: api.PrivateHandler()},
+	}
+	// Bind both listeners before starting ingestion or accepting any requests.
+	listeners := make([]net.Listener, 0, len(servers))
+	for _, server := range servers {
+		listener, err := net.Listen("tcp", server.Addr)
+		if err != nil {
+			return errors.New("HTTP listener could not bind")
+		}
+		defer listener.Close()
+		listeners = append(listeners, listener)
+		server.ReadHeaderTimeout = 5 * time.Second
+		server.ReadTimeout = 15 * time.Second
+		server.WriteTimeout = 30 * time.Second
+		server.IdleTimeout = 60 * time.Second
+		server.MaxHeaderBytes = 16 * 1024
+	}
 	worker := &app.Worker{Store: store, Oura: oura, Log: log}
 	workerCtx, stopWorker := context.WithCancel(ctx)
 	defer stopWorker()
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); worker.Run(workerCtx) }()
-	server := &http.Server{Addr: cfg.Address, Handler: api, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second,
-		WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
-	serveErr := make(chan error, 1)
-	go func() { log.Info("API listening", "address", cfg.Address); serveErr <- server.ListenAndServe() }()
+	serveErr := make(chan error, len(servers))
+	for i, server := range servers {
+		listener := listeners[i]
+		go func() {
+			log.Info("HTTP listener started", "address", server.Addr)
+			serveErr <- server.Serve(listener)
+		}()
+	}
+	var serveFailed bool
 	select {
 	case <-ctx.Done():
 	case err = <-serveErr:
-		if !errors.Is(err, http.ErrServerClosed) {
-			stopWorker()
-			return errors.New("HTTP server failed")
-		}
+		serveFailed = !errors.Is(err, http.ErrServerClosed)
 	}
 	stopWorker()
 	shutdown, done := context.WithTimeout(context.Background(), 30*time.Second)
 	defer done()
-	if err = server.Shutdown(shutdown); err != nil {
-		return errors.New("HTTP shutdown timed out")
+	var shutdownFailed bool
+	for _, server := range servers {
+		if server.Shutdown(shutdown) != nil {
+			shutdownFailed = true
+			_ = server.Close()
+		}
 	}
 	select {
 	case <-workerDone:
+		if serveFailed {
+			return errors.New("HTTP server failed")
+		}
+		if shutdownFailed {
+			return errors.New("HTTP shutdown timed out")
+		}
 		return nil
 	case <-shutdown.Done():
 		return errors.New("worker shutdown timed out")

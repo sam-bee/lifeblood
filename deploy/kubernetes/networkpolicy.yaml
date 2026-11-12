@@ -8,6 +8,8 @@ spec:
     matchLabels:
       app: lifeblood
   policyTypes: [Ingress, Egress]
+  # Traefik can reach only the public listener. The private listener uses
+  # a loopback-only hostPort for host-level Tailscale Serve, with no Service.
   ingress:
     - from:
         - namespaceSelector:

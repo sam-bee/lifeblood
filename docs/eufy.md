@@ -35,7 +35,8 @@ fixed HTTPS origin `api.eufylife.com`; HTTP redirects are refused.
 
 ## REST API
 
-Every endpoint requires `Authorization: Bearer <API_TOKEN>` and returns JSON
+Every endpoint is available only through the private `svc:lifeblood` Tailscale
+Service at `PRIVATE_BASE_URL`, requires `Authorization: Bearer <API_TOKEN>`, and returns JSON
 with `Cache-Control: no-store`. Server-side caching does not permit browser or
 proxy caching of health data.
 

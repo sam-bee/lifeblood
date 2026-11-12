@@ -11,31 +11,37 @@ import (
 )
 
 type Config struct {
-	Address, PublicURL, DatabaseURL               string
-	OuraClientID, OuraClientSecret, WebhookSecret string
-	EufyEmail, EufyPassword                       string
-	EncryptionKey                                 []byte
-	APITokenHash                                  []byte
-	TrustedProxies                                []*net.IPNet
-	HistoryDays, RetentionDays                    int
+	Address, PrivateAddress, PublicURL, PrivateURL, DatabaseURL string
+	OuraClientID, OuraClientSecret, WebhookSecret               string
+	EufyEmail, EufyPassword                                     string
+	EncryptionKey                                               []byte
+	APITokenHash                                                []byte
+	TrustedProxies                                              []*net.IPNet
+	HistoryDays, RetentionDays                                  int
 }
 
 func LoadConfig() (Config, error) { return ParseConfig(os.Getenv) }
 
 func ParseConfig(get func(string) string) (Config, error) {
-	c := Config{Address: ":8080", PublicURL: get("PUBLIC_BASE_URL"), DatabaseURL: get("DATABASE_URL"),
+	c := Config{Address: ":8080", PrivateAddress: ":8082", PublicURL: get("PUBLIC_BASE_URL"), PrivateURL: get("PRIVATE_BASE_URL"), DatabaseURL: get("DATABASE_URL"),
 		OuraClientID: get("OURA_CLIENT_ID"), OuraClientSecret: get("OURA_CLIENT_SECRET"),
 		EufyEmail: strings.TrimSpace(get("EUFYLIFE_EMAIL")), EufyPassword: get("EUFYLIFE_PASSWORD"),
 		WebhookSecret: get("OURA_WEBHOOK_VERIFICATION_TOKEN"), HistoryDays: 90, RetentionDays: 365}
 	if v := get("LISTEN_ADDRESS"); v != "" {
 		c.Address = v
 	}
-	for name, value := range map[string]string{"DATABASE_URL": c.DatabaseURL, "PUBLIC_BASE_URL": c.PublicURL} {
+	if v := get("PRIVATE_LISTEN_ADDRESS"); v != "" {
+		c.PrivateAddress = v
+	}
+	if c.Address == c.PrivateAddress {
+		return c, fmt.Errorf("public and private listeners must use different addresses")
+	}
+	for name, value := range map[string]string{"DATABASE_URL": c.DatabaseURL, "PUBLIC_BASE_URL": c.PublicURL, "PRIVATE_BASE_URL": c.PrivateURL} {
 		if strings.TrimSpace(value) == "" {
 			return c, fmt.Errorf("%s is required", name)
 		}
 	}
-	for name, raw := range map[string]string{"PUBLIC_BASE_URL": c.PublicURL} {
+	for name, raw := range map[string]string{"PUBLIC_BASE_URL": c.PublicURL, "PRIVATE_BASE_URL": c.PrivateURL} {
 		u, err := url.Parse(raw)
 		if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" {
 			return c, fmt.Errorf("%s must be a canonical HTTPS origin without a path or trailing slash", name)
