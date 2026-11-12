@@ -15,9 +15,6 @@ spec:
       labels:
         app: lifeblood
     spec:
-      # Host-level Tailscale Serve reaches this node's loopback hostPort.
-      nodeSelector:
-        kubernetes.io/hostname: containernode
       automountServiceAccountToken: false
       imagePullSecrets:
         - name: lifeblood-ghcr
@@ -92,8 +89,6 @@ spec:
             - {name: public, containerPort: 8080}
             - name: private
               containerPort: 8082
-              hostIP: 127.0.0.1
-              hostPort: 8092
           resources:
             requests: {cpu: 50m, memory: 64Mi}
             limits: {cpu: '1', memory: 256Mi}

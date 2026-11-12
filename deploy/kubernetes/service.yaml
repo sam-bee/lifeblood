@@ -8,3 +8,15 @@ spec:
     app: lifeblood
   ports:
     - {name: http, port: 80, targetPort: public}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lifeblood-api
+  namespace: lifeblood
+spec:
+  type: ClusterIP
+  selector:
+    app: lifeblood
+  ports:
+    - {name: http, port: 80, targetPort: private}

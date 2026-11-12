@@ -9,7 +9,8 @@ spec:
       app: lifeblood
   policyTypes: [Ingress, Egress]
   # Traefik can reach only the public listener. The private listener uses
-  # a loopback-only hostPort for host-level Tailscale Serve, with no Service.
+  # a private ClusterIP reached by host-level Tailscale Serve. Node-local
+  # ingress is allowed by Kubernetes; other pod ingress stays restricted.
   ingress:
     - from:
         - namespaceSelector:

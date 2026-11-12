@@ -79,30 +79,43 @@ store it in the SOPS-encrypted `lifeblood-config` Secret, without committing the
 actual tailnet name in plaintext. Leave `PUBLIC_BASE_URL` on the public origin so
 webhook subscriptions and OAuth redirects remain unchanged.
 
-The Deployment pins to `containernode` and maps the private listener to
-`hostIP: 127.0.0.1`, `hostPort: 8092`. The existing host-level Serve configuration adds:
+There are two Kubernetes ClusterIP Services selecting the same pod:
+`lifeblood` targets the public listener on port 8080; `lifeblood-api` targets the
+private listener on port 8082. The namespace keeps restricted Pod Security,
+which forbids hostPort mappings. Neither Service uses a NodePort or a public
+LoadBalancer, and the private Service has no public ingress.
+
+Host-level Tailscale Serve proxies directly to the private Service's ClusterIP:
 
 ```sh
-tailscale serve --service=svc:lifeblood --https=443 http://127.0.0.1:8092
+kubectl -n lifeblood get service lifeblood-api -o jsonpath='{.spec.clusterIP}'
+# Use that address in tailscale/run-tailscale-serve.sh:
+tailscale serve --service=svc:lifeblood --https=443 http://PRIVATE_CLUSTER_IP:80
 ```
+
+The infrastructure manifest pins the allocated private ClusterIP so the host's
+upstream is stable. When installing from the templates, allocate the private
+Service first, record its assigned ClusterIP in the infrastructure manifest, and
+use it in the host-level Serve mapping. Preserve this allocation on upgrades.
+Do not use the pod IP, which changes on restarts. Modern Linux Tailscale Serve
+supports proxying to remote upstreams, including node-reachable ClusterIPs.
 
 Define `svc:lifeblood` with endpoint `tcp:443`, approve its host advertisement if
 required, and grant access only to the intended identities in the tailnet policy.
-Tailscale terminates private HTTPS; the loopback upstream uses HTTP. There is one
-Kubernetes ClusterIP Service for the public listener and no private NodePort,
-LoadBalancer, or public ingress. Probes are absent from the private router.
-The private listener needs no second Kubernetes Service because host-level Serve
-uses the loopback hostPort directly. Both listeners share one worker, connection
-pool, Eufy cache, container image and release. Both ports must bind successfully
-before either listener or ingestion starts; either server failing stops the process.
+Tailscale terminates private HTTPS; traffic from the host to the cluster uses HTTP.
+Probes are absent from the private router. Both listeners share one worker,
+connection pool, Eufy cache, container image and release. Both ports must bind
+successfully before either listener or ingestion starts; either server failing
+stops the process.
 
 NetworkPolicy permits Traefik ingress only to port 8080, plus DNS, the shared
-PostgreSQL 18 service and outbound public HTTPS egress. Node-local ingress for
-loopback hostPort traffic is allowed by Kubernetes network-policy semantics;
-there is no general pod ingress rule for the private port. Standard Kubernetes
-policies cannot restrict egress by DNS name; the application uses fixed Oura and Eufy hosts and refuses HTTP redirects.
-Verify actual CNI policy enforcement. No Redis, public database port, application
-volume or browser authentication provider is required.
+PostgreSQL 18 service and outbound public HTTPS egress. Node-local ingress from
+Tailscale Serve is allowed by Kubernetes network-policy semantics; there is no
+general pod ingress rule for the private port. Standard Kubernetes policies
+cannot restrict egress by DNS name; the application uses fixed Oura and Eufy
+hosts and refuses HTTP redirects. Verify actual CNI policy enforcement. No Redis,
+public database port, application volume or browser authentication provider is
+required.
 
 ## Verification and operation
 
@@ -124,9 +137,9 @@ without a token it must return 401; with `Authorization: Bearer <API_TOKEN>` it
 reports connection/coverage status (`not_connected` before initial linking).
 The private address must return 404 for webhook, OAuth and probe paths. A wrong
 token, including a token placed in the URL, must be rejected. Verify that port
-8092 is unavailable on the node's public address, and that Traefik cannot connect
-to the private pod port. Check the host-local upstream with the private hostname
-in the Host header if DNS or Tailscale Service propagation is still pending.
+8082 is unavailable on the node's public address, and that Traefik cannot connect
+to the private pod port. Check the private ClusterIP from the node with the private
+hostname in the Host header if DNS or Tailscale Service propagation is still pending.
 
 Run `/lifeblood link` through `kubectl exec` as described in the main README.
 This command is available only to the cluster operator; it is not a public API.
